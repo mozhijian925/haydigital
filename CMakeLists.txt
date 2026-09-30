@@ -242,6 +242,9 @@ file(GLOB SD_LIB_SOURCES CONFIGURE_DEPENDS
     "src/tokenizers/*.cpp"
     "src/tokenizers/vocab/*.h"
     "src/tokenizers/vocab/*.cpp"
+    "src/audio/*.h"
+    "src/audio/*.cpp"
+    "src/audio/*.hpp"
 )
 
 find_program(GIT_EXE NAMES git git.exe NO_CMAKE_FIND_ROOT_PATH)
