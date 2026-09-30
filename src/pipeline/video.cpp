@@ -1078,7 +1078,8 @@ namespace sd::pipeline {
             latents.vace_context = sd::ops::concat(vace_context, mask_context, 3);  // [b, 2*c + vae_scale_factor*vae_scale_factor, t + 1 or t, h/vae_scale_factor, w/vae_scale_factor]
             int64_t t2           = ggml_time_ms();
             LOG_INFO("encode_first_stage completed, taking %" PRId64 " ms", t2 - t1);
-        } else if (sd->diffusion_model->get_desc() == "Wan2.2-S2V-14B") {
+        } else if (sd->diffusion_model->get_desc() == "Wan2.2-S2V-14B" ||
+                   sd->diffusion_model->get_desc() == "Wan2.1-MultiTalk-14B") {
             LOG_INFO("S2V");
             if (!end_image.empty()) {
                 LOG_WARN("Wan2.2 S2V ignores end_image");
@@ -1179,7 +1180,7 @@ namespace sd::pipeline {
                     latents.keyframe_indices);
             }
         }
-        if (sd->version == VERSION_WAN2_2_S2V) {
+        if (sd->version == VERSION_WAN2_2_S2V || sd->version == VERSION_WAN2_MULTI_TALK) {
             embeds.cond.c_ref_images = latents.ref_latents;
             if (!latents.s2v_audio_embed.empty()) {
                 embeds.cond.c_ref_audios = {latents.s2v_audio_embed};
@@ -1200,7 +1201,7 @@ namespace sd::pipeline {
                 embeds.uncond.c_reference_blocks = latents.minimax_reference_blocks;
                 embeds.uncond.c_position_ids     = embeds.cond.c_position_ids;
             }
-            if (sd->version == VERSION_WAN2_2_S2V) {
+            if (sd->version == VERSION_WAN2_2_S2V || sd->version == VERSION_WAN2_MULTI_TALK) {
                 embeds.uncond.c_ref_images = latents.ref_latents;
                 if (!latents.s2v_audio_embed.empty()) {
                     embeds.uncond.c_ref_audios = {sd::Tensor<float>::zeros_like(latents.s2v_audio_embed)};
@@ -1856,7 +1857,7 @@ namespace sd::pipeline {
         LOG_INFO("generating latent video completed, taking %.2fs", (latent_end - latent_start) * 1.0f / 1000);
 
         sd_audio_t* generated_audio = nullptr;
-        if (sd->version == VERSION_WAN2_2_S2V && sd_vid_gen_params->ref_audios_count > 0) {
+        if ((sd->version == VERSION_WAN2_2_S2V || sd->version == VERSION_WAN2_MULTI_TALK) && sd_vid_gen_params->ref_audios_count > 0) {
             // Return the driving track for muxing with the generated video.
             const sd_audio_t& driving = sd_vid_gen_params->ref_audios[0];
             generated_audio           = (sd_audio_t*)malloc(sizeof(sd_audio_t));
@@ -1945,7 +1946,7 @@ namespace sd::pipeline {
         if (frames_out != nullptr) {
             *frames_out = result;
         }
-        if (sd->version == VERSION_WAN2_2_S2V && generated_audio != nullptr) {
+        if ((sd->version == VERSION_WAN2_2_S2V || sd->version == VERSION_WAN2_MULTI_TALK) && generated_audio != nullptr) {
             // Limit the driving track to the generated video's duration.
             int fps               = request.fps;
             uint64_t video_frames = num_frames_out != nullptr ? (uint64_t)*num_frames_out : 0;

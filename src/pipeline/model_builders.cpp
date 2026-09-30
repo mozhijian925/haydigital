@@ -251,7 +251,7 @@ namespace sd::model_builders {
                                                                                 tensor_storage_map,
                                                                                 weight_manager);
             }
-            if (version == VERSION_WAN2_2_S2V &&
+            if ((version == VERSION_WAN2_2_S2V || version == VERSION_WAN2_MULTI_TALK) &&
                 tensor_storage_map.count("wav2vec2.encoder.layer_norm.bias") > 0) {
                 if (!ensure_backend_pair(ctx.backends, SDBackendModule::AUDIO_ENCODER)) {
                     return false;

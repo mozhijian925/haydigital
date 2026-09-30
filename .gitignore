@@ -1,7 +1,10 @@
 build*/
 cmake-build-*/
-test/
-tests/
+test_output/
+# 保留 test/ 目录用于单元测试，但排除编译产物
+test/*.exe
+test/*.o
+test/*.d
 .vscode/
 .idea/
 .cache/

@@ -447,6 +447,7 @@ SDVersion ModelLoader::get_sd_version() const {
     bool has_single_block_47         = false;
     bool is_wan                      = false;
     bool is_s2v                      = false;
+    bool is_multi_talk               = false;
     int64_t patch_embedding_channels = 0;
     bool has_img_emb                 = false;
     bool has_middle_block_1          = false;
@@ -561,6 +562,11 @@ SDVersion ModelLoader::get_sd_version() const {
             // S2V and T2V-14B share patch_embedding shapes.
             is_s2v = true;
         }
+        // MultiTalk models may have special embedding keys
+        if (tensor_storage.name.find("multi_talk_embeds") != std::string::npos ||
+            tensor_storage.name.find("infinite_talk") != std::string::npos) {
+            is_multi_talk = true;
+        }
         if (tensor_storage.name.find("model.diffusion_model.patch_embedder.weight") != std::string::npos) {
             return VERSION_LINGBOT_VIDEO;
         }
@@ -624,6 +630,9 @@ SDVersion ModelLoader::get_sd_version() const {
     }
     if (is_wan) {
         LOG_VERBOSE("patch_embedding_channels %d", patch_embedding_channels);
+        if (is_multi_talk) {
+            return VERSION_WAN2_MULTI_TALK;
+        }
         if (is_s2v) {
             return VERSION_WAN2_2_S2V;
         }

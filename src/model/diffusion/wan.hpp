@@ -933,6 +933,9 @@ namespace WAN {
                 if (version == VERSION_WAN2_2_S2V) {
                     desc          = "Wan2.2-S2V-14B";
                     config.in_dim = 16;
+                } else if (version == VERSION_WAN2_MULTI_TALK) {
+                    desc          = "Wan2.1-MultiTalk-14B";
+                    config.in_dim = 16;
                 } else if (config.model_type == "t2v") {
                     if (version == VERSION_WAN2_2_I2V) {
                         desc          = "Wan2.2-I2V-14B";
