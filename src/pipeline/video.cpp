@@ -423,7 +423,7 @@ namespace sd::pipeline {
     }
 
     // Build the first 16 fps audio window, zero-padding past the track end.
-    static sd::Tensor<float> build_s2v_audio_window(const sd::Tensor<float>& stacked, int64_t batch_frames) {
+    sd::Tensor<float> build_s2v_audio_window(const sd::Tensor<float>& stacked, int64_t batch_frames) {
         const int64_t embed_dim  = stacked.shape()[0];
         const int64_t in_frames  = stacked.shape()[1];
         const int64_t num_layers = stacked.shape()[2];
@@ -461,7 +461,7 @@ namespace sd::pipeline {
         return window;
     }
 
-    static std::optional<ImageGenerationLatents> prepare_video_generation_latents(StableDiffusionGGML* sd,
+    std::optional<ImageGenerationLatents> prepare_video_generation_latents(StableDiffusionGGML* sd,
                                                                                   const sd_vid_gen_params_t* sd_vid_gen_params,
                                                                                   GenerationRequest* request) {
         ImageGenerationLatents latents;
@@ -1145,7 +1145,7 @@ namespace sd::pipeline {
         return latents;
     }
 
-    static std::optional<ImageGenerationEmbeds> prepare_video_generation_embeds(StableDiffusionGGML* sd,
+    std::optional<ImageGenerationEmbeds> prepare_video_generation_embeds(StableDiffusionGGML* sd,
                                                                                 const sd_vid_gen_params_t* sd_vid_gen_params,
                                                                                 const GenerationRequest& request,
                                                                                 const ImageGenerationLatents& latents) {

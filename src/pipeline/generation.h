@@ -70,6 +70,22 @@ namespace sd::pipeline {
 
     sd::Tensor<float> ensure_image_tensor_channels(sd::Tensor<float> image, int channels);
 
+    // Build S2V/MultiTalk audio window for conditioning
+    sd::Tensor<float> build_s2v_audio_window(const sd::Tensor<float>& stacked, int64_t batch_frames);
+
+    // Prepare video generation latents (S2V/MultiTalk support)
+    std::optional<ImageGenerationLatents> prepare_video_generation_latents(
+        StableDiffusionGGML* sd,
+        const sd_vid_gen_params_t* sd_vid_gen_params,
+        GenerationRequest* request);
+
+    // Prepare video generation embeddings (S2V/MultiTalk support)
+    std::optional<ImageGenerationEmbeds> prepare_video_generation_embeds(
+        StableDiffusionGGML* sd,
+        const sd_vid_gen_params_t* sd_vid_gen_params,
+        const GenerationRequest& request,
+        const ImageGenerationLatents& latents);
+
 }  // namespace sd::pipeline
 
 #endif  // __SD_PIPELINE_GENERATION_H__

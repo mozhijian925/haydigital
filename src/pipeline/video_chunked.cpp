@@ -2,6 +2,8 @@
 
 #include "pipeline/diffusion_engine.h"
 #include "pipeline/generation.h"
+#include "pipeline/request.h"
+#include "model/diffusion/model.hpp"
 #include "core/util.h"
 #include "runtime/audio_processing.h"
 
@@ -126,46 +128,114 @@ float ChunkedVideoGenerator::get_progress() const {
 std::optional<sd::Tensor<float>> ChunkedVideoGenerator::process_chunk(
     const AudioChunk& chunk,
     const sd::Tensor<float>& ref_latent) {
-    
-    // 构建该块的 GenerationRequest
-    GenerationRequest req(sd_, params_.width, params_.height, params_.video_frames, params_.fps);
 
-    // 构建 Audio 数据
+    LOG_INFO("Processing audio chunk: %lld samples @ 16kHz", (long long)chunk.duration_samples);
+
+    // 1. 构建 Audio 数据
     sd_audio_t audio_data{};
     audio_data.sample_rate = 16000;
     audio_data.channels = 1;
     audio_data.sample_count = chunk.duration_samples;
     audio_data.data = const_cast<float*>(chunk.data);
 
-    // 构建 sd_vid_gen_params_t
+    // 2. 构建 sd_vid_gen_params_t
     sd_vid_gen_params_t vid_params{};
     sd_vid_gen_params_init(&vid_params);
     vid_params.init_image = sd_image_t{0, 0, 0, nullptr};  // 不使用 init_image
     vid_params.ref_audios = &audio_data;
     vid_params.ref_audios_count = 1;
+    vid_params.width = params_.width;
+    vid_params.height = params_.height;
     vid_params.video_frames = params_.video_frames;
     vid_params.fps = params_.fps;
     vid_params.sample_params = sd_sample_params_t{};
 
-    // 调用现有的 generate_video 函数
-    sd_image_t* frames = nullptr;
-    int num_frames = 0;
-    sd_audio_t* audio_out = nullptr;
-    int fps = 0;
+    // 3. 构建 GenerationRequest
+    GenerationRequest req(sd_, &vid_params);
 
-    if (!generate_video(sd_, &vid_params, &frames, &num_frames, &audio_out, &fps)) {
-        LOG_ERROR("generate_video failed for chunk");
+    // 4. 准备 latents
+    auto latents_opt = pipeline::prepare_video_generation_latents(sd_, &vid_params, &req);
+    if (!latents_opt.has_value()) {
+        LOG_ERROR("failed to prepare video generation latents");
+        return std::nullopt;
+    }
+    auto latents = std::move(*latents_opt);
+
+    // 5. 替换 ref_latent（使用传入的参考图片 latent）
+    latents.ref_latents.clear();
+    latents.ref_latents.push_back(ref_latent);
+
+    // 6. 计算音频 embedding
+    auto stacked = sd_->get_audio_embedding(audio_data);
+    if (stacked.empty()) {
+        LOG_ERROR("failed to compute audio embedding");
         return std::nullopt;
     }
 
-    // 转换回 latent 用于拼接
-    // 注意：这里需要反向操作，但实际上应该直接调用 sampling 而不是 generate_video
-    // 简化处理：返回空，等待进一步实现
-    if (frames) free(frames);
-    if (audio_out) free_sd_audio(audio_out);
+    // 7. 构建 audio window
+    int64_t latent_t = sd_->video_frames_to_latent_frames(params_.video_frames);
+    int64_t batch_frames = latent_t * 4;
+    auto audio_window = pipeline::build_s2v_audio_window(stacked, batch_frames);
+    if (audio_window.empty()) {
+        LOG_ERROR("failed to build s2v audio window");
+        return std::nullopt;
+    }
+    latents.s2v_audio_embed = audio_window;
 
-    LOG_WARN("process_chunk: simplified implementation - need to implement full latent processing");
-    return std::nullopt;
+    // 8. 准备 embeds（条件编码）
+    auto embeds_opt = pipeline::prepare_video_generation_embeds(sd_, &vid_params, req, latents);
+    if (!embeds_opt.has_value()) {
+        LOG_ERROR("failed to prepare video generation embeds");
+        return std::nullopt;
+    }
+    auto embeds = std::move(*embeds_opt);
+
+    // 9. 设置 audio conditioning（S2V/MultiTalk）
+    embeds.cond.c_ref_images = latents.ref_latents;
+    if (!latents.s2v_audio_embed.empty()) {
+        embeds.cond.c_ref_audios = {latents.s2v_audio_embed};
+    }
+
+    // 10. 初始化噪声
+    sd::Tensor<float> noise = sd::Tensor<float>::randn_like(latents.init_latent, sd_->rng);
+
+    // 11. 采样推理
+    sd_sample_params_t default_params = vid_params.sample_params;
+    auto result = sd_->sample(
+        sd_->diffusion_model,
+        true,
+        latents.init_latent,
+        std::move(noise),
+        embeds.cond,
+        SDCondition(),  // S2V 不需要 uncond
+        SDCondition(),  // img_uncond
+        sd::Tensor<float>(),  // control_image
+        0.f,  // control_strength
+        default_params.guidance,
+        default_params.eta,
+        default_params.shifted_timestep,
+        default_params.sample_method,
+        sd_->is_flow_denoiser(),
+        nullptr,  // extra_sample_args
+        std::vector<float>{},  // sigmas
+        std::vector<sd::Tensor<float>>{},  // ref_latents（已通过 embeds 传递）
+        RefImageParams(),
+        latents.denoise_mask,
+        latents.vace_context,
+        req.vace_strength,
+        latents.audio_length,
+        static_cast<float>(req.fps),
+        req.cache_params,
+        true,  // high_noise_sample_steps <= 0
+        latents.video_positions);
+
+    if (result.empty()) {
+        LOG_ERROR("sampling failed");
+        return std::nullopt;
+    }
+
+    LOG_INFO("Sampling completed for chunk");
+    return result;
 }
 
 sd::Tensor<float> ChunkedVideoGenerator::blend_chunks(
