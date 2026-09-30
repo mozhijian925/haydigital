@@ -54,6 +54,11 @@ struct SDCliParams {
     bool metadata_brief      = false;
     bool metadata_all        = false;
 
+    // Chunked video generation options
+    bool chunked_mode = false;
+    float chunk_duration = 5.0f;
+    float overlap_duration = 1.0f;
+
     std::string imatrix_out;
     std::vector<std::string> imatrix_in;
 
@@ -134,6 +139,18 @@ struct SDCliParams {
              "--metadata-all",
              "include structural/container entries such as IHDR, IDAT, and non-metadata JPEG segments",
              true, &metadata_all},
+            {"",
+             "--chunked",
+             "enable chunked video generation for infinite duration (MultiTalk/S2V)",
+             true, &chunked_mode},
+            {"",
+             "--chunk-duration",
+             "chunk duration in seconds for chunked generation (default: 5.0)",
+             &chunk_duration},
+            {"",
+             "--overlap",
+             "overlap duration in seconds between chunks (default: 1.0)",
+             &overlap_duration},
 
         };
 
@@ -821,6 +838,21 @@ int main(int argc, const char* argv[]) {
         }
     }
 
+    // Load audio data for chunked generation
+    std::vector<float> audio_data;
+    uint32_t audio_sample_rate = 0;
+    uint32_t audio_channels = 0;
+    int64_t audio_samples = 0;
+    if (!gen_params.ref_audio_paths.empty() && cli_params.chunked_mode) {
+        if (!load_wav_from_file(gen_params.ref_audio_paths[0], audio_data, audio_sample_rate, audio_channels)) {
+            LOG_ERROR("load audio for chunked generation failed");
+            return 1;
+        }
+        audio_samples = static_cast<int64_t>(audio_data.size());
+        LOG_INFO("Loaded audio: %lld samples @ %u Hz, %u channels",
+                 (long long)audio_samples, audio_sample_rate, audio_channels);
+    }
+
     if (gen_params.mask_image_path.size() > 0) {
         if (!load_sd_image_from_file(gen_params.mask_image.put(),
                                      gen_params.mask_image_path.c_str(),
@@ -915,13 +947,47 @@ int main(int argc, const char* argv[]) {
             num_results = 1;
             results.push_back(gen_params.init_image.release());
         } else if (cli_params.mode == VID_GEN) {
-            sd_vid_gen_params_t vid_gen_params = gen_params.to_sd_vid_gen_params_t();
-            sd_image_t* generated_video        = nullptr;
-            if (!generate_video(sd_ctx.get(), &vid_gen_params, &generated_video, &num_results, &generated_audio, &cli_params.preview_fps)) {
-                generated_video = nullptr;
+            // Check if chunked mode is enabled for MultiTalk/S2V
+            if (cli_params.chunked_mode &&
+                (sd_ctx->sd->version == VERSION_WAN2_MULTI_TALK ||
+                 sd_ctx->sd->version == VERSION_WAN2_2_S2V)) {
+
+                LOG_INFO("Using chunked video generation for %s",
+                         sd_ctx->sd->version == VERSION_WAN2_MULTI_TALK ? "MultiTalk" : "S2V");
+
+                sd::ChunkedVideoGenerator::Params chunked_params;
+                chunked_params.chunk_duration_sec = cli_params.chunk_duration;
+                chunked_params.overlap_sec = cli_params.overlap_duration;
+                chunked_params.fps = cli_params.preview_fps;
+                chunked_params.video_frames = gen_params.video_frames;
+                chunked_params.width = gen_params.width;
+                chunked_params.height = gen_params.height;
+
+                sd::ChunkedVideoGenerator generator(sd_ctx->sd.get(), chunked_params);
+
+                sd_image_t** chunked_frames = nullptr;
+                int num_chunked_frames = 0;
+                int chunked_fps = 0;
+
+                if (generator.generate(gen_params.init_image.get(),
+                                       audio_data.data(), audio_samples,
+                                       &chunked_frames, &num_chunked_frames, &chunked_fps)) {
+                    results.adopt(chunked_frames, num_chunked_frames);
+                    cli_params.preview_fps = chunked_fps;
+                } else {
+                    LOG_ERROR("chunked video generation failed");
+                    return 1;
+                }
+            } else {
+                sd_vid_gen_params_t vid_gen_params = gen_params.to_sd_vid_gen_params_t();
+                sd_image_t* generated_video = nullptr;
+                if (!generate_video(sd_ctx.get(), &vid_gen_params, &generated_video,
+                                   &num_results, &generated_audio, &cli_params.preview_fps)) {
+                    generated_video = nullptr;
+                }
+                gen_params.fps = cli_params.preview_fps;
+                results.adopt(generated_video, num_results);
             }
-            gen_params.fps = cli_params.preview_fps;
-            results.adopt(generated_video, num_results);
         }
 
         if (!results) {

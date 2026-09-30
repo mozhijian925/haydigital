@@ -26,6 +26,8 @@ public:
         int video_frames = 81;             // 每块帧数
         bool blend_overlaps = true;        // 是否混合重叠区域
         float blend_strength = 0.5f;       // 混合强度
+        int width = 832;                   // 输出宽度
+        int height = 480;                  // 输出高度
     };
 
     ChunkedVideoGenerator(StableDiffusionGGML* sd, const Params& params);
